@@ -14,6 +14,7 @@ const notificationRoutes = require('./routes/notifications');
 const videoRoutes = require('./routes/videos');
 const adultVideoRoutes = require('./routes/adultVideos');
 const subscriptionRoutes = require('./routes/subscriptions');
+const streamProxyRoute = require('./routes/streamProxy');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -49,6 +50,7 @@ app.use('/api/videos', videoRoutes);
 app.use('/api/adult-videos', adultVideoRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/stream-proxy', streamProxyRoute);
 
 // Health check
 app.get('/api/health', (req, res) => {
