@@ -1,7 +1,7 @@
 const AdultVideo = require('../models/AdultVideo');
 const AdultVideoPurchase = require('../models/AdultVideoPurchase');
 const cloudinary = require('../config/cloudinary');
-const { createTransaction, checkTransactionStatus } = require('../utils/payment');
+const { createTransaction, checkTransactionStatus, normalizePaymentStatus } = require('../utils/payment');
 
 // ── Public: Get active adult videos (with user's purchase status) ──
 exports.getAdultVideos = async (req, res) => {
@@ -355,17 +355,30 @@ exports.checkPaymentStatus = async (req, res) => {
     }
 
     // Poll FastLipa
-    const txnStatus = await checkTransactionStatus(purchase.transactionId);
-    const paymentStatus = txnStatus.payment_status;
+    let txnStatus;
+    try {
+      txnStatus = await checkTransactionStatus(purchase.transactionId);
+    } catch (err) {
+      return res.json({ success: true, data: { status: 'pending', rawStatus: 'NETWORK_ERROR' } });
+    }
 
-    if (paymentStatus === 'COMPLETE') {
+    const rawStatus = txnStatus.payment_status;
+    const normalized = normalizePaymentStatus(rawStatus);
+
+    if (normalized === 'completed') {
       purchase.status = 'completed';
       await purchase.save();
-      return res.json({ success: true, data: { status: 'completed' } });
+      return res.json({ success: true, data: { status: 'completed', rawStatus } });
+    }
+
+    if (normalized === 'failed') {
+      purchase.status = 'failed';
+      await purchase.save();
+      return res.json({ success: true, data: { status: 'failed', rawStatus } });
     }
 
     // Still pending
-    res.json({ success: true, data: { status: 'pending', payment_status: paymentStatus } });
+    res.json({ success: true, data: { status: 'pending', rawStatus } });
   } catch (err) {
     console.error('Check adult video payment status error:', err);
     res.status(500).json({ success: false, message: 'Failed to check payment status' });

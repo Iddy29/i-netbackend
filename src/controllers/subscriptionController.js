@@ -1,7 +1,7 @@
 const ChannelSubscriptionPlan = require('../models/ChannelSubscriptionPlan');
 const ChannelSubscription = require('../models/ChannelSubscription');
 const PromoCode = require('../models/PromoCode');
-const { createTransaction, checkTransactionStatus } = require('../utils/payment');
+const { createTransaction, checkTransactionStatus, normalizePaymentStatus } = require('../utils/payment');
 
 // ═══════════════════════════════════════
 // ── Public endpoints (authenticated) ──
@@ -278,10 +278,17 @@ exports.checkPaymentStatus = async (req, res) => {
     }
 
     // Poll FastLipa
-    const txnStatus = await checkTransactionStatus(sub.transactionId);
-    const paymentStatus = txnStatus.payment_status;
+    let txnStatus;
+    try {
+      txnStatus = await checkTransactionStatus(sub.transactionId);
+    } catch (err) {
+      return res.json({ success: true, data: { status: 'pending', rawStatus: 'NETWORK_ERROR' } });
+    }
 
-    if (paymentStatus === 'COMPLETE') {
+    const rawStatus = txnStatus.payment_status;
+    const normalized = normalizePaymentStatus(rawStatus);
+
+    if (normalized === 'completed') {
       const startDate = new Date();
       const endDate = new Date(startDate.getTime() + sub.durationDays * 24 * 60 * 60 * 1000);
 
@@ -296,10 +303,16 @@ exports.checkPaymentStatus = async (req, res) => {
         await PromoCode.findOneAndUpdate({ code: sub.promoCode }, { $inc: { usedCount: 1 } });
       }
 
-      return res.json({ success: true, data: { status: 'completed', startDate, endDate } });
+      return res.json({ success: true, data: { status: 'completed', startDate, endDate, rawStatus } });
     }
 
-    res.json({ success: true, data: { status: 'pending', payment_status: paymentStatus } });
+    if (normalized === 'failed') {
+      sub.paymentStatus = 'failed';
+      await sub.save();
+      return res.json({ success: true, data: { status: 'failed', rawStatus } });
+    }
+
+    res.json({ success: true, data: { status: 'pending', rawStatus } });
   } catch (err) {
     console.error('Check subscription payment error:', err);
     res.status(500).json({ success: false, message: 'Failed to check payment status' });

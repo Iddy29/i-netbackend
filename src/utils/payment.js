@@ -64,6 +64,7 @@ const checkTransactionStatus = async (tranId) => {
       throw new Error(data.message || 'Failed to check transaction status');
     }
 
+    console.log(`FastLipa status for ${tranId}: payment_status="${data.data.payment_status}"`);
     return data.data;
   } catch (error) {
     console.error('FastLipa status check error:', error.message);
@@ -71,4 +72,23 @@ const checkTransactionStatus = async (tranId) => {
   }
 };
 
-module.exports = { createTransaction, checkTransactionStatus };
+/**
+ * Normalize FastLipa payment_status to a standard value.
+ * FastLipa may return: COMPLETE, COMPLETED, SUCCESS, SUCCESSFUL, PENDING, FAILED, CANCELLED, etc.
+ *
+ * @param {string} rawStatus - The raw payment_status from FastLipa
+ * @returns {'completed' | 'failed' | 'pending'}
+ */
+const normalizePaymentStatus = (rawStatus) => {
+  if (!rawStatus) return 'pending';
+  const s = rawStatus.toUpperCase().trim();
+  if (['COMPLETE', 'COMPLETED', 'SUCCESS', 'SUCCESSFUL'].includes(s)) {
+    return 'completed';
+  }
+  if (['FAILED', 'FAIL', 'CANCELLED', 'CANCELED', 'REJECTED', 'DECLINED'].includes(s)) {
+    return 'failed';
+  }
+  return 'pending';
+};
+
+module.exports = { createTransaction, checkTransactionStatus, normalizePaymentStatus };

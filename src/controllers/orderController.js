@@ -1,6 +1,6 @@
 const Order = require('../models/Order');
 const Service = require('../models/Service');
-const { createTransaction, checkTransactionStatus } = require('../utils/payment');
+const { createTransaction, checkTransactionStatus, normalizePaymentStatus } = require('../utils/payment');
 const {
   notifyPaymentCompleted,
   notifyPaymentFailed,
@@ -141,13 +141,18 @@ const checkPaymentStatus = async (req, res) => {
       // If FastLipa is unreachable, don't fail - just return pending
       return res.status(200).json({
         success: true,
-        data: { paymentStatus: 'pending', orderStatus: order.status },
+        data: {
+          paymentStatus: 'pending',
+          orderStatus: order.status,
+          rawStatus: 'NETWORK_ERROR',
+        },
       });
     }
 
-    const paymentResult = fastLipaStatus.payment_status;
+    const rawStatus = fastLipaStatus.payment_status;
+    const normalized = normalizePaymentStatus(rawStatus);
 
-    if (paymentResult === 'COMPLETE') {
+    if (normalized === 'completed') {
       // Payment succeeded - update order
       order.paymentStatus = 'completed';
       // Keep order status as 'pending' for admin to process
@@ -158,14 +163,28 @@ const checkPaymentStatus = async (req, res) => {
 
       return res.status(200).json({
         success: true,
-        data: { paymentStatus: 'completed', orderStatus: order.status },
+        data: { paymentStatus: 'completed', orderStatus: order.status, rawStatus },
+      });
+    }
+
+    if (normalized === 'failed') {
+      order.paymentStatus = 'failed';
+      order.status = 'cancelled';
+      order.adminNote = `Payment failed (FastLipa: ${rawStatus})`;
+      await order.save();
+
+      notifyPaymentFailed(order);
+
+      return res.status(200).json({
+        success: true,
+        data: { paymentStatus: 'failed', orderStatus: order.status, rawStatus },
       });
     }
 
     // Still pending
     return res.status(200).json({
       success: true,
-      data: { paymentStatus: 'pending', orderStatus: order.status },
+      data: { paymentStatus: 'pending', orderStatus: order.status, rawStatus },
     });
   } catch (error) {
     console.error('Check payment status error:', error);
